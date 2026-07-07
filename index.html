@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>英語フレーズ リピーター</title>
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.json">
+<style>
+  :root {
+    --accent: #378ADD;
+    --accent-dark: #185FA5;
+    --bg: #f5f5f3;
+    --card: #ffffff;
+    --border: #e2e0da;
+    --text: #222220;
+    --text-muted: #83817a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-bottom: 100px;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 8px 4px 16px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0; }
+  #addBtn {
+    background: var(--accent); color: #fff; border: none; border-radius: 10px;
+    padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  #addBtn:active { background: var(--accent-dark); }
+  #fileInput { display: none; }
+  #empty { text-align: center; color: var(--text-muted); font-size: 14px; padding: 60px 20px; line-height: 1.7; }
+  #list { display: flex; flex-direction: column; gap: 8px; }
+  .track {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 12px; cursor: pointer;
+  }
+  .track.active { border-color: var(--accent); background: #eaf2fb; }
+  .track .num {
+    width: 26px; height: 26px; border-radius: 50%; background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; color: var(--text-muted); flex-shrink: 0;
+  }
+  .track .name { flex: 1; font-size: 14px; word-break: break-word; }
+  .track.active .name { color: var(--accent-dark); font-weight: 600; }
+  .track .del {
+    background: none; border: none; color: var(--text-muted); font-size: 18px;
+    padding: 6px; cursor: pointer; line-height: 1;
+  }
+  #player {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: var(--card); border-top: 1px solid var(--border);
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    display: none;
+  }
+  #player.show { display: block; }
+  .player-inner { max-width: 480px; margin: 0 auto; }
+  .now { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .now-label { font-size: 11px; color: var(--text-muted); }
+  .now-name { font-size: 14px; font-weight: 600; }
+  #playPause {
+    width: 40px; height: 40px; border-radius: 50%; border: none;
+    background: var(--accent); color: #fff; font-size: 14px; cursor: pointer;
+  }
+  .controls { display: flex; align-items: center; gap: 10px; }
+  #repeatBtn {
+    font-size: 12px; padding: 6px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); cursor: pointer; white-space: nowrap;
+  }
+  #repeatBtn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .speed-wrap { flex: 1; display: flex; align-items: center; gap: 6px; }
+  .speed-wrap span { font-size: 12px; color: var(--text-muted); min-width: 34px; }
+  input[type="range"] { flex: 1; }
+  footer { text-align: center; font-size: 11px; color: var(--text-muted); padding: 20px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>英語フレーズ リピーター</h1>
+    <button id="addBtn" type="button">＋ 音声を追加</button>
+  </header>
+  <input id="fileInput" type="file" accept="audio/*" multiple>
+
+  <div id="empty">まだ音声がありません。<br>「＋ 音声を追加」から、ダウンロードした音声ファイルを選んでください。</div>
+  <div id="list"></div>
+
+  <footer>一度読み込んだ音声は、この端末の中に保存されます。次回からはネット接続がなくても開けます。</footer>
+</div>
+
+<div id="player">
+  <div class="player-inner">
+    <div class="now">
+      <div>
+        <div class="now-label">再生中</div>
+        <div class="now-name" id="nowName">-</div>
+      </div>
+      <button id="playPause" type="button">▶</button>
+    </div>
+    <div class="controls">
+      <button id="repeatBtn" type="button" class="on">🔁 くり返しON</button>
+      <div class="speed-wrap">
+        <input type="range" id="speed" min="0.5" max="1.5" step="0.1" value="1">
+        <span id="speedOut">1.0x</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<audio id="audioEl"></audio>
+
+<script>
+const DB_NAME = 'englishAudioReplay';
+const STORE = 'tracks';
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function addTracks(files) {
+  const db = await openDB();
+  const tx = db.transaction(STORE, 'readwrite');
+  const store = tx.objectStore(STORE);
+  const base = Date.now();
+  files.forEach((file, i) => {
+    store.add({ name: file.name, blob: file, addedAt: base + i });
+  });
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getAllTracks() {
+  const db = await openDB();
+  const tx = db.transaction(STORE, 'readonly');
+  const store = tx.objectStore(STORE);
+  return new Promise((resolve, reject) => {
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result.sort((a, b) => a.addedAt - b.addedAt));
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function deleteTrack(id) {
+  const db = await openDB();
+  const tx = db.transaction(STORE, 'readwrite');
+  tx.objectStore(STORE).delete(id);
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function displayName(name) {
+  return name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').trim();
+}
+
+const listEl = document.getElementById('list');
+const emptyEl = document.getElementById('empty');
+const playerEl = document.getElementById('player');
+const nowNameEl = document.getElementById('nowName');
+const playPauseBtn = document.getElementById('playPause');
+const repeatBtn = document.getElementById('repeatBtn');
+const speedInput = document.getElementById('speed');
+const speedOut = document.getElementById('speedOut');
+const audioEl = document.getElementById('audioEl');
+
+let tracks = [];
+let activeId = null;
+let repeatOn = true;
+let currentUrl = null;
+
+async function refresh() {
+  tracks = await getAllTracks();
+  emptyEl.style.display = tracks.length ? 'none' : 'block';
+  listEl.innerHTML = '';
+  tracks.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'track' + (t.id === activeId ? ' active' : '');
+    row.innerHTML =
+      '<span class="num">' + (i + 1) + '</span>' +
+      '<span class="name">' + displayName(t.name) + '</span>' +
+      '<button class="del" type="button" aria-label="削除">🗑</button>';
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.del')) return;
+      play(t);
+    });
+    row.querySelector('.del').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await deleteTrack(t.id);
+      if (activeId === t.id) stop();
+      refresh();
+    });
+    listEl.appendChild(row);
+  });
+}
+
+function play(track) {
+  activeId = track.id;
+  if (currentUrl) URL.revokeObjectURL(currentUrl);
+  currentUrl = URL.createObjectURL(track.blob);
+  audioEl.src = currentUrl;
+  audioEl.loop = repeatOn;
+  audioEl.playbackRate = parseFloat(speedInput.value);
+  audioEl.play();
+  nowNameEl.textContent = displayName(track.name);
+  playerEl.classList.add('show');
+  playPauseBtn.textContent = '⏸';
+  refresh();
+}
+
+function stop() {
+  audioEl.pause();
+  audioEl.removeAttribute('src');
+  playerEl.classList.remove('show');
+  activeId = null;
+}
+
+document.getElementById('addBtn').addEventListener('click', () => {
+  document.getElementById('fileInput').click();
+});
+
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (files.length) {
+    await addTracks(files);
+    e.target.value = '';
+    refresh();
+  }
+});
+
+playPauseBtn.addEventListener('click', () => {
+  if (audioEl.paused) {
+    audioEl.play();
+    playPauseBtn.textContent = '⏸';
+  } else {
+    audioEl.pause();
+    playPauseBtn.textContent = '▶';
+  }
+});
+
+repeatBtn.addEventListener('click', () => {
+  repeatOn = !repeatOn;
+  audioEl.loop = repeatOn;
+  repeatBtn.classList.toggle('on', repeatOn);
+  repeatBtn.textContent = '🔁 くり返し' + (repeatOn ? 'ON' : 'OFF');
+});
+
+speedInput.addEventListener('input', () => {
+  const v = parseFloat(speedInput.value);
+  audioEl.playbackRate = v;
+  speedOut.textContent = v.toFixed(1) + 'x';
+});
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+refresh();
+</script>
+</body>
+</html>
