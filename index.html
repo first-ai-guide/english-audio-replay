@@ -71,7 +71,7 @@
   .modal h2 { font-size: 15px; margin: 0 0 12px; font-weight: 600; }
   .modal p.hint { font-size: 12px; color: var(--text-muted); margin: -6px 0 12px; line-height: 1.6; }
   .modal select, .modal input[type="text"] {
-    width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px; margin-bottom: 10px;
+    width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-size: 16px; margin-bottom: 10px;
   }
   .modal .modal-actions { display: flex; gap: 8px; margin-top: 6px; }
   .modal .modal-actions .btn { flex: 1; }
@@ -409,6 +409,8 @@ let currentUrl = null;
 let currentJaUrl = null;
 let queue = null; // { trackIds: [], index: 0 }
 let gapTimerId = null;
+let pendingGapAction = null;
+let isPlaybackPaused = false;
 let playingSegment = null; // 'en' | 'ja'
 
 const titleText = document.getElementById('titleText');
@@ -575,6 +577,16 @@ function clearGapTimer() {
   if (gapTimerId) { clearTimeout(gapTimerId); gapTimerId = null; }
 }
 
+function scheduleGap(fn) {
+  clearGapTimer();
+  pendingGapAction = fn;
+  gapTimerId = setTimeout(() => {
+    gapTimerId = null;
+    pendingGapAction = null;
+    fn();
+  }, SILENCE_MS);
+}
+
 function playSegment(blob, onEnd) {
   if (currentUrl) URL.revokeObjectURL(currentUrl);
   currentUrl = URL.createObjectURL(blob);
@@ -590,14 +602,12 @@ function runCycle() {
   nowLabelEl.textContent = queue ? '連続再生中 (' + (queue.index + 1) + '/' + queue.trackIds.length + ')' : '再生中';
   playSegment(activeTrack.englishBlob, () => {
     if (activeTrack.japaneseBlob) {
-      clearGapTimer();
-      gapTimerId = setTimeout(() => {
+      scheduleGap(() => {
         playingSegment = 'ja';
         playSegment(activeTrack.japaneseBlob, onCycleComplete);
-      }, SILENCE_MS);
+      });
     } else {
-      clearGapTimer();
-      gapTimerId = setTimeout(onCycleComplete, SILENCE_MS);
+      scheduleGap(onCycleComplete);
     }
   });
   updateMediaSession();
@@ -606,11 +616,9 @@ function runCycle() {
 function onCycleComplete() {
   playingSegment = null;
   if (queue) {
-    clearGapTimer();
-    gapTimerId = setTimeout(advanceQueue, SILENCE_MS);
+    scheduleGap(advanceQueue);
   } else if (repeatOn) {
-    clearGapTimer();
-    gapTimerId = setTimeout(runCycle, SILENCE_MS);
+    scheduleGap(runCycle);
   } else {
     playPauseBtn.textContent = '▶';
   }
@@ -633,6 +641,7 @@ function advanceQueue() {
 
 function startPlayback(track) {
   activeTrack = track;
+  isPlaybackPaused = false;
   nowNameEl.textContent = track.englishText || displayName(track.name);
   nowJpEl.textContent = track.japaneseText || '';
   playerEl.classList.add('show');
@@ -642,6 +651,8 @@ function startPlayback(track) {
 
 function stopPlayback() {
   clearGapTimer();
+  pendingGapAction = null;
+  isPlaybackPaused = false;
   audioEl.pause();
   audioEl.removeAttribute('src');
   playerEl.classList.remove('show');
@@ -659,21 +670,43 @@ function gotoRelative(offset) {
   if (nextIdx < 0 || nextIdx >= folderTracks.length) return;
   queue = null;
   clearGapTimer();
+  pendingGapAction = null;
   startPlayback(folderTracks[nextIdx]);
 }
 
 prevBtn.addEventListener('click', () => gotoRelative(-1));
 nextBtn.addEventListener('click', () => gotoRelative(1));
 
-playPauseBtn.addEventListener('click', () => {
-  if (!activeTrack) return;
-  if (gapTimerId) return; // silence gap in progress; let it resolve naturally
-  if (audioEl.paused) {
-    audioEl.play();
-    playPauseBtn.textContent = '⏸';
+function pausePlayback() {
+  if (!activeTrack || isPlaybackPaused) return;
+  isPlaybackPaused = true;
+  playPauseBtn.textContent = '▶';
+  if (gapTimerId) {
+    clearGapTimer(); // pendingGapAction stays set, so resumePlayback can continue from here
   } else {
     audioEl.pause();
-    playPauseBtn.textContent = '▶';
+  }
+}
+
+function resumePlayback() {
+  if (!activeTrack || !isPlaybackPaused) return;
+  isPlaybackPaused = false;
+  playPauseBtn.textContent = '⏸';
+  if (pendingGapAction) {
+    const fn = pendingGapAction;
+    pendingGapAction = null;
+    fn();
+  } else {
+    audioEl.play();
+  }
+}
+
+playPauseBtn.addEventListener('click', () => {
+  if (!activeTrack) return;
+  if (isPlaybackPaused) {
+    resumePlayback();
+  } else {
+    pausePlayback();
   }
 });
 
@@ -699,12 +732,8 @@ function updateMediaSession() {
 }
 
 if ('mediaSession' in navigator) {
-  navigator.mediaSession.setActionHandler('play', () => {
-    if (audioEl.src) { audioEl.play(); playPauseBtn.textContent = '⏸'; }
-  });
-  navigator.mediaSession.setActionHandler('pause', () => {
-    if (audioEl.src) { audioEl.pause(); playPauseBtn.textContent = '▶'; }
-  });
+  navigator.mediaSession.setActionHandler('play', resumePlayback);
+  navigator.mediaSession.setActionHandler('pause', pausePlayback);
   navigator.mediaSession.setActionHandler('previoustrack', () => gotoRelative(-1));
   navigator.mediaSession.setActionHandler('nexttrack', () => gotoRelative(1));
 }
