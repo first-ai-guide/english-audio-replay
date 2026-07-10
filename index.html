@@ -56,9 +56,13 @@
   .card.active .name { color: var(--accent-dark); font-weight: 600; }
   .card .sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
   .card .jp-text { font-size: 12px; color: var(--accent-dark); background: #eaf2fb; padding: 2px 6px; border-radius: 6px; margin-top: 4px; display: inline-block; }
-  .card .icon-btn { background: none; border: none; color: var(--text-muted); font-size: 16px; padding: 5px; cursor: pointer; line-height: 1; flex-shrink: 0; }
-  .card .reorder { display: flex; flex-direction: column; gap: 2px; }
-  .card .reorder button { font-size: 12px; padding: 2px 6px; }
+  .card .icon-btn { background: none; border: none; color: var(--text-muted); font-size: 18px; padding: 10px; cursor: pointer; line-height: 1; flex-shrink: 0; min-width: 40px; min-height: 40px; }
+  .card .reorder { display: flex; flex-direction: column; gap: 4px; }
+  .card .reorder button {
+    font-size: 14px; padding: 8px; min-width: 40px; min-height: 34px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
+  }
+  .card .reorder button:disabled { opacity: 0.3; }
 
   #modalOverlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.4);
@@ -170,7 +174,7 @@
 <script>
 const DB_NAME = 'englishAudioReplay';
 const DB_VERSION = 3;
-const SILENCE_MS = 2000;
+const SILENCE_MS = 1500;
 const SAMPLE_FOLDER_NAME = 'ホテル滞在を快適にする一言';
 const SAMPLE_ZIP_FILES = [
   'i_arrived_earlier_than_my_checkin_time_could_you_p.zip',
@@ -535,6 +539,7 @@ async function renderFolderView() {
     });
     row.querySelector('.del').addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (!confirm('「' + (t.englishText || displayName(t.name)) + '」を削除しますか？')) return;
       await deleteTrack(t.id);
       if (activeTrack && activeTrack.id === t.id) stopPlayback();
       renderFolderView();
@@ -593,7 +598,7 @@ function playSegment(blob, onEnd) {
   audioEl.src = currentUrl;
   audioEl.playbackRate = parseFloat(speedInput.value);
   audioEl.onended = onEnd;
-  audioEl.play();
+  audioEl.play().catch((err) => console.warn('再生に失敗しました', err));
   playPauseBtn.textContent = '⏸';
 }
 
@@ -697,7 +702,7 @@ function resumePlayback() {
     pendingGapAction = null;
     fn();
   } else {
-    audioEl.play();
+    audioEl.play().catch((err) => console.warn('再生に失敗しました', err));
   }
 }
 
