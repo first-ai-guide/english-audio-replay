@@ -48,6 +48,7 @@
   .empty { text-align: center; color: var(--text-muted); font-size: 14px; padding: 60px 20px; line-height: 1.7; }
   .row-actions { display: flex; gap: 8px; margin-bottom: 12px; }
   .row-actions .btn { flex: 1; }
+  .row-actions .btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   #list { display: flex; flex-direction: column; gap: 8px; }
   .card {
     display: flex; align-items: center; gap: 8px;
@@ -431,6 +432,8 @@ const titleText = document.getElementById('titleText');
 const headerBar = document.getElementById('headerBar');
 const addBtn = document.getElementById('addBtn');
 const rowActions = document.getElementById('rowActions');
+const sequentialBtn = document.getElementById('sequentialBtn');
+const shuffleBtn = document.getElementById('shuffleBtn');
 const emptyEl = document.getElementById('empty');
 const listEl = document.getElementById('list');
 const playerEl = document.getElementById('player');
@@ -511,9 +514,16 @@ async function openFolder(folder) {
   await renderFolderView();
 }
 
+function updateRowActionsHighlight() {
+  const mode = queue ? queue.mode : null;
+  sequentialBtn.classList.toggle('active', mode === 'sequential');
+  shuffleBtn.classList.toggle('active', mode === 'shuffle');
+}
+
 async function renderFolderView() {
   folderTracks = await getTracksForFolder(currentFolder.id);
   rowActions.style.display = folderTracks.length ? 'flex' : 'none';
+  updateRowActionsHighlight();
   if (!folderTracks.length) {
     emptyEl.style.display = 'block';
     emptyEl.innerHTML = 'このフォルダにはまだ音声がありません。<br>「＋ ZIPを追加」から追加してください。';
@@ -579,14 +589,14 @@ function shuffleArray(arr) {
   return a;
 }
 
-document.getElementById('sequentialBtn').addEventListener('click', () => {
-  queue = { trackIds: folderTracks.map((t) => t.id), index: 0 };
+sequentialBtn.addEventListener('click', () => {
+  queue = { trackIds: folderTracks.map((t) => t.id), index: 0, mode: 'sequential' };
   startPlayback(folderTracks.find((t) => t.id === queue.trackIds[0]));
 });
 
-document.getElementById('shuffleBtn').addEventListener('click', () => {
+shuffleBtn.addEventListener('click', () => {
   const shuffled = shuffleArray(folderTracks.map((t) => t.id));
-  queue = { trackIds: shuffled, index: 0 };
+  queue = { trackIds: shuffled, index: 0, mode: 'shuffle' };
   startPlayback(folderTracks.find((t) => t.id === queue.trackIds[0]));
 });
 
