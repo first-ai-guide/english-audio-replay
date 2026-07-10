@@ -632,8 +632,11 @@ function onCycleComplete() {
 function advanceQueue() {
   queue.index += 1;
   if (queue.index >= queue.trackIds.length) {
-    stopPlayback();
-    return;
+    if (!repeatOn) {
+      stopPlayback();
+      return;
+    }
+    queue.index = 0;
   }
   const nextId = queue.trackIds[queue.index];
   const next = folderTracks.find((t) => t.id === nextId);
