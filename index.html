@@ -83,32 +83,32 @@
   #player {
     position: fixed; left: 0; right: 0; bottom: 0;
     background: var(--card); border-top: 1px solid var(--border);
-    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
     display: none;
   }
   #player.show { display: block; }
   .player-inner { max-width: 480px; margin: 0 auto; }
-  .now { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
-  .now-label { font-size: 11px; color: var(--text-muted); }
-  .now-name { font-size: 14px; font-weight: 600; }
-  .now-jp { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-  .transport { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .now { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 8px; }
+  .now-label { font-size: 13px; color: var(--text-muted); }
+  .now-name { font-size: 19px; font-weight: 600; line-height: 1.4; }
+  .now-jp { font-size: 15px; color: var(--text-muted); margin-top: 4px; }
+  .transport { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .transport button {
-    width: 36px; height: 36px; border-radius: 50%; border: none;
-    background: var(--bg); color: var(--text); font-size: 13px; cursor: pointer; flex-shrink: 0;
+    width: 44px; height: 44px; border-radius: 50%; border: none;
+    background: var(--bg); color: var(--text); font-size: 16px; cursor: pointer; flex-shrink: 0;
   }
   #playPause {
-    width: 40px; height: 40px; border-radius: 50%; border: none;
-    background: var(--accent); color: #fff; font-size: 14px; cursor: pointer; flex-shrink: 0;
+    width: 56px; height: 56px; border-radius: 50%; border: none;
+    background: var(--accent); color: #fff; font-size: 19px; cursor: pointer; flex-shrink: 0;
   }
   .controls { display: flex; align-items: center; gap: 10px; }
   #repeatBtn {
-    font-size: 12px; padding: 6px 10px; border-radius: 8px;
+    font-size: 14px; padding: 8px 12px; border-radius: 8px;
     border: 1px solid var(--border); background: var(--bg); cursor: pointer; white-space: nowrap;
   }
   #repeatBtn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .speed-wrap { flex: 1; display: flex; align-items: center; gap: 6px; }
-  .speed-wrap span { font-size: 12px; color: var(--text-muted); min-width: 34px; }
+  .speed-wrap span { font-size: 13px; color: var(--text-muted); min-width: 34px; }
   input[type="range"] { flex: 1; }
   footer { text-align: center; font-size: 11px; color: var(--text-muted); padding: 20px 0 0; }
 </style>
