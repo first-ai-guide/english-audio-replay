@@ -337,8 +337,8 @@ async function processZipFile(file) {
   }
   if (!englishEntry) return null;
 
-  const englishBlob = await englishEntry.async('blob');
-  const japaneseBlob = japaneseEntry ? await japaneseEntry.async('blob') : null;
+  const englishBlob = new Blob([await englishEntry.async('blob')], { type: 'audio/mpeg' });
+  const japaneseBlob = japaneseEntry ? new Blob([await japaneseEntry.async('blob')], { type: 'audio/mpeg' }) : null;
   let englishText = null, japaneseText = null;
   if (textEntry) {
     const txt = await textEntry.async('string');
