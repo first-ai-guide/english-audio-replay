@@ -1,4 +1,4 @@
-const CACHE_NAME = 'audio-replay-v9';
+const CACHE_NAME = 'audio-replay-v10';
 const CORE_FILES = ['./', './index.html', './manifest.json'];
 const OPTIONAL_FILES = [
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
