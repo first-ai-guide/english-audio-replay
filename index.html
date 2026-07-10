@@ -18,14 +18,23 @@
     --text-muted: #83817a;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
     font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
     background: var(--bg);
     color: var(--text);
-    padding-bottom: 100px;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
-  .wrap { max-width: 480px; margin: 0 auto; padding: 16px; }
+  .wrap {
+    max-width: 480px; margin: 0 auto; padding: 16px; width: 100%;
+    flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+  }
+  #scrollArea { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 8px 4px 16px; gap: 8px; }
   .back { background: none; border: none; font-size: 20px; padding: 4px 8px; cursor: pointer; color: var(--text); }
   h1 { font-size: 17px; font-weight: 600; margin: 0; flex: 1; }
@@ -81,10 +90,11 @@
   .modal .modal-actions .btn { flex: 1; }
 
   #player {
-    position: fixed; left: 0; right: 0; bottom: 0;
     background: var(--card); border-top: 1px solid var(--border);
     padding: 18px 18px calc(22px + env(safe-area-inset-bottom));
     display: none;
+    flex-shrink: 0;
+    width: 100%;
   }
   #player.show { display: block; }
   .player-inner { max-width: 480px; margin: 0 auto; }
@@ -126,10 +136,12 @@
     <button class="btn ghost" id="shuffleBtn" type="button">🔀 シャッフル再生</button>
   </div>
 
-  <div id="empty" class="empty"></div>
-  <div id="list"></div>
+  <div id="scrollArea">
+    <div id="empty" class="empty"></div>
+    <div id="list"></div>
 
-  <footer>一度読み込んだ音声は、この端末の中に保存されます。次回からはネット接続がなくても開けます。</footer>
+    <footer>一度読み込んだ音声は、この端末の中に保存されます。次回からはネット接続がなくても開けます。</footer>
+  </div>
 </div>
 
 <div id="modalOverlay">
@@ -671,14 +683,34 @@ function stopPlayback() {
 }
 
 function gotoRelative(offset) {
-  if (!activeTrack || !folderTracks.length) return;
+  if (!activeTrack) return;
+  clearGapTimer();
+  pendingGapAction = null;
+  isPlaybackPaused = false;
+  if (queue) {
+    let idx = queue.index + offset;
+    if (idx < 0) {
+      if (!repeatOn) return;
+      idx = queue.trackIds.length - 1;
+    } else if (idx >= queue.trackIds.length) {
+      if (!repeatOn) { stopPlayback(); return; }
+      idx = 0;
+    }
+    queue.index = idx;
+    const next = folderTracks.find((t) => t.id === queue.trackIds[idx]);
+    if (!next) return;
+    activeTrack = next;
+    nowNameEl.textContent = next.englishText || displayName(next.name);
+    nowJpEl.textContent = next.japaneseText || '';
+    renderFolderView();
+    runCycle();
+    return;
+  }
+  if (!folderTracks.length) return;
   const idx = folderTracks.findIndex((t) => t.id === activeTrack.id);
   if (idx === -1) return;
   const nextIdx = idx + offset;
   if (nextIdx < 0 || nextIdx >= folderTracks.length) return;
-  queue = null;
-  clearGapTimer();
-  pendingGapAction = null;
   startPlayback(folderTracks[nextIdx]);
 }
 
