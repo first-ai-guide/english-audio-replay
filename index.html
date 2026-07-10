@@ -508,7 +508,7 @@ async function openFolder(folder) {
     back.className = 'back';
     back.type = 'button';
     back.textContent = '←';
-    back.addEventListener('click', () => { stopPlayback(); renderFoldersView(); });
+    back.addEventListener('click', () => { renderFoldersView(); stopPlayback(); });
     headerBar.insertBefore(back, titleText);
   }
   await renderFolderView();
