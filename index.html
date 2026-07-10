@@ -83,23 +83,23 @@
   #player {
     position: fixed; left: 0; right: 0; bottom: 0;
     background: var(--card); border-top: 1px solid var(--border);
-    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    padding: 18px 18px calc(22px + env(safe-area-inset-bottom));
     display: none;
   }
   #player.show { display: block; }
   .player-inner { max-width: 480px; margin: 0 auto; }
-  .now { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 8px; }
-  .now-label { font-size: 13px; color: var(--text-muted); }
-  .now-name { font-size: 19px; font-weight: 600; line-height: 1.4; }
-  .now-jp { font-size: 15px; color: var(--text-muted); margin-top: 4px; }
-  .transport { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .now-text { text-align: center; margin-bottom: 18px; }
+  .now-label { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
+  .now-name { font-size: 21px; font-weight: 600; line-height: 1.45; margin-bottom: 8px; }
+  .now-jp { font-size: 15px; color: var(--text-muted); }
+  .transport { display: flex; align-items: center; justify-content: center; gap: 22px; margin-bottom: 18px; }
   .transport button {
-    width: 44px; height: 44px; border-radius: 50%; border: none;
-    background: var(--bg); color: var(--text); font-size: 16px; cursor: pointer; flex-shrink: 0;
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: var(--bg); color: var(--text); font-size: 18px; cursor: pointer; flex-shrink: 0;
   }
   #playPause {
-    width: 56px; height: 56px; border-radius: 50%; border: none;
-    background: var(--accent); color: #fff; font-size: 19px; cursor: pointer; flex-shrink: 0;
+    width: 66px; height: 66px; border-radius: 50%; border: none;
+    background: var(--accent); color: #fff; font-size: 23px; cursor: pointer; flex-shrink: 0;
   }
   .controls { display: flex; align-items: center; gap: 10px; }
   #repeatBtn {
@@ -147,17 +147,15 @@
 
 <div id="player">
   <div class="player-inner">
-    <div class="now">
-      <div style="min-width:0;">
-        <div class="now-label" id="nowLabel">再生中</div>
-        <div class="now-name" id="nowName">-</div>
-        <div class="now-jp" id="nowJp"></div>
-      </div>
-      <div class="transport">
-        <button id="prevBtn" type="button" title="前へ">⏮</button>
-        <button id="playPause" type="button">▶</button>
-        <button id="nextBtn" type="button" title="次へ">⏭</button>
-      </div>
+    <div class="now-text">
+      <div class="now-label" id="nowLabel">再生中</div>
+      <div class="now-name" id="nowName">-</div>
+      <div class="now-jp" id="nowJp"></div>
+    </div>
+    <div class="transport">
+      <button id="prevBtn" type="button" title="前へ">⏮</button>
+      <button id="playPause" type="button">▶</button>
+      <button id="nextBtn" type="button" title="次へ">⏭</button>
     </div>
     <div class="controls">
       <button id="repeatBtn" type="button" class="on">🔁 くり返しON</button>
