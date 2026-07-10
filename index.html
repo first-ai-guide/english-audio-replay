@@ -74,6 +74,12 @@
   }
   .modal h2 { font-size: 15px; margin: 0 0 12px; font-weight: 600; }
   .modal p.hint { font-size: 12px; color: var(--text-muted); margin: -6px 0 12px; line-height: 1.6; }
+  .modal-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .modal-tabs .tab-btn {
+    flex: 1; padding: 9px 6px; font-size: 13px; font-weight: 600; text-align: center;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-muted); cursor: pointer;
+  }
+  .modal-tabs .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .modal select, .modal input[type="text"] {
     width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-size: 16px; margin-bottom: 10px;
   }
@@ -136,8 +142,12 @@
   <div class="modal">
     <h2>追加先のフォルダ</h2>
     <p class="hint">Geminiで保存したZIPファイル（英語音声・日本語音声・テキストが入ったもの）を選んでください。複数まとめて選択できます。</p>
+    <div class="modal-tabs">
+      <button class="tab-btn" id="tabExisting" type="button">既存フォルダに追加</button>
+      <button class="tab-btn" id="tabNew" type="button">新しいフォルダを作る</button>
+    </div>
     <select id="folderSelect"></select>
-    <input type="text" id="newFolderName" placeholder="新しいフォルダ名（作る場合のみ入力）">
+    <input type="text" id="newFolderName" placeholder="新しいフォルダ名を入力">
     <div class="modal-actions">
       <button class="btn ghost" id="modalCancel" type="button">キャンセル</button>
       <button class="btn" id="modalConfirm" type="button">この内容で追加</button>
@@ -437,6 +447,9 @@ const audioEl = document.getElementById('audioEl');
 const modalOverlay = document.getElementById('modalOverlay');
 const folderSelect = document.getElementById('folderSelect');
 const newFolderName = document.getElementById('newFolderName');
+const tabExisting = document.getElementById('tabExisting');
+const tabNew = document.getElementById('tabNew');
+let addFolderMode = 'existing'; // 'existing' | 'new'
 
 async function renderFoldersView() {
   view = 'folders';
@@ -756,14 +769,30 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
   await openFolderModal();
 });
 
+function setAddFolderMode(mode) {
+  addFolderMode = mode;
+  tabExisting.classList.toggle('active', mode === 'existing');
+  tabNew.classList.toggle('active', mode === 'new');
+  folderSelect.style.display = mode === 'existing' ? 'block' : 'none';
+  newFolderName.style.display = mode === 'new' ? 'block' : 'none';
+}
+
+tabExisting.addEventListener('click', () => setAddFolderMode('existing'));
+tabNew.addEventListener('click', () => setAddFolderMode('new'));
+
 async function openFolderModal() {
   const folders = await getAllFolders();
   folderSelect.innerHTML = '<option value="">-- 選択してください --</option>' +
     folders.map((f) => '<option value="' + f.id + '">' + f.name + '</option>').join('');
+  newFolderName.value = '';
   if (view === 'folder' && currentFolder) {
     folderSelect.value = String(currentFolder.id);
+    setAddFolderMode('existing');
+  } else if (!folders.length) {
+    setAddFolderMode('new');
+  } else {
+    setAddFolderMode('existing');
   }
-  newFolderName.value = '';
   modalOverlay.classList.add('show');
 }
 
@@ -773,14 +802,20 @@ document.getElementById('modalCancel').addEventListener('click', () => {
 });
 
 document.getElementById('modalConfirm').addEventListener('click', async () => {
-  let folderId = folderSelect.value ? parseInt(folderSelect.value, 10) : null;
-  const newName = newFolderName.value.trim();
-  if (newName) {
+  let folderId = null;
+  if (addFolderMode === 'new') {
+    const newName = newFolderName.value.trim();
+    if (!newName) {
+      alert('新しいフォルダ名を入力してください。');
+      return;
+    }
     folderId = await addFolder(newName);
-  }
-  if (!folderId) {
-    alert('フォルダを選ぶか、新しいフォルダ名を入力してください。');
-    return;
+  } else {
+    folderId = folderSelect.value ? parseInt(folderSelect.value, 10) : null;
+    if (!folderId) {
+      alert('追加先のフォルダを選んでください。');
+      return;
+    }
   }
   modalOverlay.classList.remove('show');
   const files = pendingFiles;
