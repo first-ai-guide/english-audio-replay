@@ -34,7 +34,7 @@
     max-width: 480px; margin: 0 auto; padding: 16px; width: 100%;
     flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
   }
-  #scrollArea { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  #scrollArea { flex: 1; min-height: 0; overflow-y: auto; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 8px 4px 16px; gap: 8px; }
   .back { background: none; border: none; font-size: 20px; padding: 4px 8px; cursor: pointer; color: var(--text); }
   h1 { font-size: 17px; font-weight: 600; margin: 0; flex: 1; }
@@ -800,14 +800,6 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
   pendingFiles = files;
   await openFolderModal();
 });
-
-function setAddFolderMode(mode) {
-  addFolderMode = mode;
-  tabExisting.classList.toggle('active', mode === 'existing');
-  tabNew.classList.toggle('active', mode === 'new');
-  folderSelect.style.display = mode === 'existing' ? 'block' : 'none';
-  newFolderName.style.display = mode === 'new' ? 'block' : 'none';
-}
 
 function updateModalForSelection() {
   const isNew = folderSelect.value === NEW_FOLDER_VALUE;
