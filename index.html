@@ -5,8 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>英語フレーズ リピーター</title>
 <meta name="theme-color" content="#ffffff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="英語リピート">
 <link rel="manifest" href="manifest.json">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<script src="jszip.min.js"></script>
 <style>
   :root {
     --accent: #378ADD;
@@ -200,20 +206,37 @@ const SAMPLE_ZIP_FILES = [
   'can_we_change_the_breakfast_time_tomorrow_to_7_ocl.zip'
 ];
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (e) => {
+    req.onupgradeneeded = () => {
+      // 既存ストアは消さない（バージョンを上げても保存済みの音声を守る）
       const db = req.result;
-      if (db.objectStoreNames.contains('tracks')) db.deleteObjectStore('tracks');
       if (!db.objectStoreNames.contains('folders')) {
         db.createObjectStore('folders', { keyPath: 'id', autoIncrement: true });
       }
-      const trackStore = db.createObjectStore('tracks', { keyPath: 'id', autoIncrement: true });
-      trackStore.createIndex('folderId', 'folderId');
+      if (!db.objectStoreNames.contains('tracks')) {
+        const trackStore = db.createObjectStore('tracks', { keyPath: 'id', autoIncrement: true });
+        trackStore.createIndex('folderId', 'folderId');
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('別のタブでこのアプリが開いています。他のタブを閉じてください。'));
+  });
+}
+
+function txDone(db, tx) {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+    tx.onabort = () => { db.close(); reject(tx.error || new Error('保存が中断されました')); };
   });
 }
 
@@ -221,10 +244,8 @@ async function addFolder(name) {
   const db = await openDB();
   const tx = db.transaction('folders', 'readwrite');
   const req = tx.objectStore('folders').add({ name, createdAt: Date.now() });
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+  await txDone(db, tx);
+  return req.result;
 }
 
 async function renameFolder(id, name) {
@@ -232,16 +253,11 @@ async function renameFolder(id, name) {
   const tx = db.transaction('folders', 'readwrite');
   const store = tx.objectStore('folders');
   const getReq = store.get(id);
-  return new Promise((resolve, reject) => {
-    getReq.onsuccess = () => {
-      const rec = getReq.result;
-      if (!rec) return resolve();
-      rec.name = name;
-      store.put(rec);
-    };
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  getReq.onsuccess = () => {
+    const rec = getReq.result;
+    if (rec) { rec.name = name; store.put(rec); }
+  };
+  return txDone(db, tx);
 }
 
 async function getAllFolders() {
@@ -249,8 +265,8 @@ async function getAllFolders() {
   const tx = db.transaction('folders', 'readonly');
   return new Promise((resolve, reject) => {
     const req = tx.objectStore('folders').getAll();
-    req.onsuccess = () => resolve(req.result.sort((a, b) => a.createdAt - b.createdAt));
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { db.close(); resolve(req.result.sort((a, b) => a.createdAt - b.createdAt)); };
+    req.onerror = () => { db.close(); reject(req.error); };
   });
 }
 
@@ -263,10 +279,7 @@ async function deleteFolder(id) {
   req.onsuccess = () => {
     req.result.forEach((k) => tx.objectStore('tracks').delete(k));
   };
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  return txDone(db, tx);
 }
 
 async function addTrack(folderId, entry, sortOrder) {
@@ -282,10 +295,7 @@ async function addTrack(folderId, entry, sortOrder) {
     sortOrder,
     addedAt: Date.now()
   });
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  return txDone(db, tx);
 }
 
 async function putTracks(records) {
@@ -293,10 +303,7 @@ async function putTracks(records) {
   const tx = db.transaction('tracks', 'readwrite');
   const store = tx.objectStore('tracks');
   records.forEach((r) => store.put(r));
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  return txDone(db, tx);
 }
 
 async function getTracksForFolder(folderId) {
@@ -305,8 +312,22 @@ async function getTracksForFolder(folderId) {
   const idx = tx.objectStore('tracks').index('folderId');
   return new Promise((resolve, reject) => {
     const req = idx.getAll(IDBKeyRange.only(folderId));
-    req.onsuccess = () => resolve(req.result.sort((a, b) => a.sortOrder - b.sortOrder || a.addedAt - b.addedAt));
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      db.close();
+      resolve(req.result.sort((a, b) => (a.sortOrder - b.sortOrder) || (a.addedAt - b.addedAt)));
+    };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
+async function countTracksForFolder(folderId) {
+  // 件数表示のために音声本体まで読み込まない（一覧を軽くする）
+  const db = await openDB();
+  const tx = db.transaction('tracks', 'readonly');
+  const req = tx.objectStore('tracks').index('folderId').count(IDBKeyRange.only(folderId));
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => { db.close(); resolve(req.result); };
+    req.onerror = () => { db.close(); reject(req.error); };
   });
 }
 
@@ -314,18 +335,11 @@ async function deleteTrack(id) {
   const db = await openDB();
   const tx = db.transaction('tracks', 'readwrite');
   tx.objectStore('tracks').delete(id);
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  return txDone(db, tx);
 }
 
 function displayName(name) {
   return name.replace(/[_-]+/g, ' ').trim();
-}
-
-function isAudioExt(name) {
-  return /\.(mp3|wav|m4a|ogg|aac)$/i.test(name);
 }
 
 function baseName(name) {
@@ -333,68 +347,131 @@ function baseName(name) {
 }
 
 // ---- ZIP import ----
+const AUDIO_MIME = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg' };
+
+function audioExt(name) {
+  const m = name.match(/\.(mp3|wav|m4a|ogg|aac)$/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function decodeText(bytes) {
+  // UTF-8で読めなければ Shift_JIS として読み直す（Windowsのメモ帳由来のtxt対策）
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (e) {
+    try {
+      return new TextDecoder('shift_jis').decode(bytes);
+    } catch (e2) {
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+  }
+}
+
 async function processZipFile(file) {
+  if (typeof JSZip === 'undefined') {
+    return { entries: [], reason: '読み込み用の部品が未取得です。ネット接続のある状態で一度ページを開き直してください' };
+  }
   let zip;
   try {
     zip = await JSZip.loadAsync(file);
   } catch (e) {
-    return null;
+    return { entries: [], reason: 'ZIPとして開けません（壊れているか、ZIP以外のファイルです）' };
   }
-  const entries = Object.values(zip.files).filter((f) => !f.dir);
-  let englishEntry = null, japaneseEntry = null, textEntry = null;
-  for (const e of entries) {
-    const name = e.name.split('/').pop();
-    if (/\.txt$/i.test(name)) { textEntry = e; }
-    else if (isAudioExt(name)) {
-      if (/_ja\.[a-z0-9]+$/i.test(name)) japaneseEntry = e;
-      else englishEntry = e;
+  // 「同じ名前のセット（英語音声・_ja日本語音声・txt）」ごとにまとめる。複数フレーズ入りZIPも全部取り込む
+  const groups = new Map();
+  const grp = (base) => {
+    if (!groups.has(base)) groups.set(base, {});
+    return groups.get(base);
+  };
+  for (const f of Object.values(zip.files)) {
+    if (f.dir) continue;
+    if (/(^|\/)__MACOSX\//.test(f.name)) continue; // Macが付ける隠しデータは無視
+    const fname = f.name.split('/').pop();
+    if (fname.startsWith('._') || fname === '.DS_Store') continue;
+    const ext = audioExt(fname);
+    if (/\.txt$/i.test(fname)) {
+      grp(baseName(fname)).txt = f;
+    } else if (ext) {
+      if (/_ja\.[a-z0-9]+$/i.test(fname)) {
+        const g = grp(baseName(fname).replace(/_ja$/i, ''));
+        g.ja = f; g.jaExt = ext;
+      } else {
+        const g = grp(baseName(fname));
+        g.en = f; g.enExt = ext;
+      }
     }
   }
-  if (!englishEntry) return null;
-
-  const englishBlob = new Blob([await englishEntry.async('blob')], { type: 'audio/mpeg' });
-  const japaneseBlob = japaneseEntry ? new Blob([await japaneseEntry.async('blob')], { type: 'audio/mpeg' }) : null;
-  let englishText = null, japaneseText = null;
-  if (textEntry) {
-    const txt = await textEntry.async('string');
-    const lines = txt.split(/\r?\n/);
-    englishText = (lines[0] || '').trim() || null;
-    japaneseText = (lines[1] || '').trim() || null;
+  const entries = [];
+  try {
+    for (const [base, g] of groups) {
+      if (!g.en && !g.ja) continue; // txtだけの組は無視
+      if (!g.en) { g.en = g.ja; g.enExt = g.jaExt; g.ja = null; } // 音声が1つだけなら英語扱いで救済
+      const englishBlob = new Blob([await g.en.async('blob')], { type: AUDIO_MIME[g.enExt] || 'audio/mpeg' });
+      const japaneseBlob = g.ja
+        ? new Blob([await g.ja.async('blob')], { type: AUDIO_MIME[g.jaExt] || 'audio/mpeg' })
+        : null;
+      let englishText = null, japaneseText = null;
+      if (g.txt) {
+        const txt = decodeText(await g.txt.async('uint8array')).replace(/^\uFEFF/, '');
+        const lines = txt.split(/\r?\n/);
+        englishText = (lines[0] || '').trim() || null;
+        japaneseText = (lines[1] || '').trim() || null;
+      }
+      entries.push({
+        name: base || englishText || '名前なし',
+        englishBlob, japaneseBlob, englishText, japaneseText
+      });
+    }
+  } catch (e) {
+    return { entries: [], reason: 'ZIPの中身を取り出せません（ファイルが壊れている可能性があります）' };
   }
-  const name = baseName(englishEntry.name.split('/').pop());
-  return { name, englishBlob, japaneseBlob, englishText, japaneseText };
-}
-
-function uniqueTrackName(existingNames, name) {
-  if (!existingNames.has(name)) return name;
-  let i = 2;
-  while (existingNames.has(name + '_' + i)) i++;
-  return name + '_' + i;
+  if (!entries.length) {
+    return { entries: [], reason: '音声ファイル（mp3など）が見つかりません' };
+  }
+  return { entries, reason: null };
 }
 
 async function importZipFilesIntoFolder(folderId, files) {
   const existing = await getTracksForFolder(folderId);
   const existingNames = new Set(existing.map((t) => t.name));
-  let nextOrder = existing.length ? Math.max(...existing.map((t) => t.sortOrder)) + 1 : 0;
-  let okCount = 0, failCount = 0;
+  let nextOrder = existing.reduce(
+    (m, t) => Math.max(m, Number.isFinite(t.sortOrder) ? t.sortOrder : 0), -1) + 1;
+  let okCount = 0;
+  const skipped = [];
+  const failed = [];
   for (const file of files) {
-    const entry = await processZipFile(file);
-    if (!entry) { failCount++; continue; }
-    entry.name = uniqueTrackName(existingNames, entry.name);
-    existingNames.add(entry.name);
-    await addTrack(folderId, entry, nextOrder++);
-    okCount++;
+    const result = await processZipFile(file);
+    if (result.reason) {
+      failed.push(file.name + '：' + result.reason);
+      continue;
+    }
+    for (const entry of result.entries) {
+      if (existingNames.has(entry.name)) {
+        // 同じフレーズはもう入っている → 重複追加しない
+        skipped.push(entry.englishText || displayName(entry.name));
+        continue;
+      }
+      existingNames.add(entry.name);
+      await addTrack(folderId, entry, nextOrder++);
+      okCount++;
+    }
   }
-  return { okCount, failCount };
+  return { okCount, skipped, failed };
 }
 
 // ---- sample folder (first launch only) ----
+function markSeeded() {
+  try { localStorage.setItem('sampleSeeded', '1'); } catch (e) { /* 保存できなくても続行 */ }
+}
+
 async function seedSampleFolderIfNeeded() {
-  if (localStorage.getItem('sampleSeeded') === '1') return;
-  localStorage.setItem('sampleSeeded', '1');
-  const folders = await getAllFolders();
-  if (folders.length) return; // user already has content; don't intrude
   try {
+    if (localStorage.getItem('sampleSeeded') === '1') return;
+  } catch (e) { /* localStorage不可でも起動は続ける（下のフォルダ有無で判定） */ }
+  const folders = await getAllFolders();
+  if (folders.length) { markSeeded(); return; } // すでに使い始めている
+  try {
+    if (typeof JSZip === 'undefined') return; // 部品が無ければ今回は見送り、次回また試す
     const files = [];
     for (const name of SAMPLE_ZIP_FILES) {
       try {
@@ -404,9 +481,14 @@ async function seedSampleFolderIfNeeded() {
         files.push(new File([blob], name));
       } catch (e) { /* skip missing sample file */ }
     }
-    if (!files.length) return;
+    if (files.length !== SAMPLE_ZIP_FILES.length) return; // 全部揃うまで「済み」にしない（オフライン初回対策）
     const folderId = await addFolder(SAMPLE_FOLDER_NAME);
-    await importZipFilesIntoFolder(folderId, files);
+    const r = await importZipFilesIntoFolder(folderId, files);
+    if (r.okCount > 0) {
+      markSeeded();
+    } else {
+      await deleteFolder(folderId); // 空のお手本フォルダを残さない
+    }
   } catch (e) {
     console.warn('サンプルフォルダの読み込みに失敗しました', e);
   }
@@ -421,10 +503,11 @@ let pendingFiles = null;
 let activeTrack = null;
 let repeatOn = true;
 let currentUrl = null;
-let currentJaUrl = null;
-let queue = null; // { trackIds: [], index: 0 }
+let queue = null; // { trackIds: [], index: 0, mode: 'sequential' | 'shuffle' }
 let gapTimerId = null;
 let pendingGapAction = null;
+let gapStartedAt = 0;
+let gapRemaining = 0;
 let isPlaybackPaused = false;
 let playingSegment = null; // 'en' | 'ja'
 
@@ -453,6 +536,12 @@ const newFolderName = document.getElementById('newFolderName');
 const modalConfirmBtn = document.getElementById('modalConfirm');
 const NEW_FOLDER_VALUE = '__new__';
 
+try {
+  // 速度を落としても声の高さが変わらないようにする
+  audioEl.preservesPitch = true;
+  audioEl.webkitPreservesPitch = true;
+} catch (e) { /* 非対応ブラウザは既定のまま */ }
+
 async function renderFoldersView() {
   view = 'folders';
   titleText.textContent = '英語フレーズ リピーター';
@@ -468,13 +557,13 @@ async function renderFoldersView() {
   emptyEl.style.display = 'none';
   listEl.innerHTML = '';
   for (const f of folders) {
-    const tracks = await getTracksForFolder(f.id);
+    const count = await countTracksForFolder(f.id);
     const row = document.createElement('div');
     row.className = 'card';
     row.innerHTML =
       '<span class="main">' +
-      '<div class="name">📁 ' + f.name + '</div>' +
-      '<div class="sub">' + tracks.length + '件</div>' +
+      '<div class="name">📁 ' + escapeHtml(f.name) + '</div>' +
+      '<div class="sub">' + count + '件</div>' +
       '</span>' +
       '<button class="icon-btn rename" type="button" aria-label="名前を変更">✎</button>' +
       '<button class="icon-btn del" type="button" aria-label="削除">🗑</button>';
@@ -499,7 +588,15 @@ async function renderFoldersView() {
   }
 }
 
+function showFoldersHome() {
+  view = 'folders';
+  stopPlayback();
+  renderFoldersView();
+}
+
 async function openFolder(folder) {
+  // 別のフォルダの音声が鳴ったまま画面だけ切り替わらないようにする
+  if (activeTrack && (!currentFolder || currentFolder.id !== folder.id)) stopPlayback();
   currentFolder = folder;
   view = 'folder';
   titleText.textContent = folder.name;
@@ -508,11 +605,21 @@ async function openFolder(folder) {
     back.className = 'back';
     back.type = 'button';
     back.textContent = '←';
-    back.addEventListener('click', () => { renderFoldersView(); stopPlayback(); });
+    back.addEventListener('click', () => {
+      if (history.state && history.state.v === 'folder') history.back();
+      else showFoldersHome();
+    });
     headerBar.insertBefore(back, titleText);
+  }
+  if (!history.state || history.state.v !== 'folder') {
+    history.pushState({ v: 'folder' }, ''); // スマホの「戻る」でフォルダ一覧に戻れるようにする
   }
   await renderFolderView();
 }
+
+window.addEventListener('popstate', () => {
+  if (view === 'folder') showFoldersHome();
+});
 
 function updateRowActionsHighlight() {
   const mode = queue ? queue.mode : null;
@@ -538,8 +645,8 @@ async function renderFolderView() {
     row.innerHTML =
       '<span class="num">' + (i + 1) + '</span>' +
       '<span class="main">' +
-      '<div class="name">' + (t.englishText || displayName(t.name)) + '</div>' +
-      (t.japaneseText ? '<span class="jp-text">' + t.japaneseText + '</span>' : '') +
+      '<div class="name">' + escapeHtml(t.englishText || displayName(t.name)) + '</div>' +
+      (t.japaneseText ? '<span class="jp-text">' + escapeHtml(t.japaneseText) + '</span>' : '') +
       '</span>' +
       '<span class="reorder">' +
       '<button class="up" type="button" aria-label="上へ"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
@@ -578,6 +685,13 @@ async function moveTrack(fromIndex, toIndex) {
   arr.forEach((t, idx) => { t.sortOrder = idx; });
   await putTracks(arr);
   await renderFolderView();
+  if (queue && queue.mode === 'sequential') {
+    // 並べ替えを連続再生の順番にも反映する
+    const curId = queue.trackIds[queue.index];
+    queue.trackIds = folderTracks.map((t) => t.id);
+    const idx = queue.trackIds.indexOf(curId);
+    if (idx !== -1) queue.index = idx;
+  }
 }
 
 function shuffleArray(arr) {
@@ -604,29 +718,48 @@ function clearGapTimer() {
   if (gapTimerId) { clearTimeout(gapTimerId); gapTimerId = null; }
 }
 
-function scheduleGap(fn) {
+function scheduleGap(fn, delay) {
   clearGapTimer();
   pendingGapAction = fn;
+  gapStartedAt = Date.now();
+  gapRemaining = (delay == null) ? SILENCE_MS : delay;
   gapTimerId = setTimeout(() => {
     gapTimerId = null;
     pendingGapAction = null;
     fn();
-  }, SILENCE_MS);
+  }, gapRemaining);
+}
+
+function setPlaybackState(state) {
+  if ('mediaSession' in navigator) {
+    try { navigator.mediaSession.playbackState = state; } catch (e) { /* 非対応は無視 */ }
+  }
 }
 
 function playSegment(blob, onEnd) {
   if (currentUrl) URL.revokeObjectURL(currentUrl);
   currentUrl = URL.createObjectURL(blob);
+  audioEl.onended = null;
+  audioEl.onerror = null;
   audioEl.src = currentUrl;
   audioEl.playbackRate = parseFloat(speedInput.value);
   audioEl.onended = onEnd;
+  audioEl.onerror = () => {
+    // 再生できない音声で連続再生が止まらないよう、聞き終わった扱いで先へ進める
+    nowLabelEl.textContent = 'この音声は再生できませんでした';
+    onEnd();
+  };
   audioEl.play().catch((err) => console.warn('再生に失敗しました', err));
   playPauseBtn.textContent = '⏸';
+  setPlaybackState('playing');
 }
 
 function runCycle() {
   playingSegment = 'en';
-  nowLabelEl.textContent = queue ? '連続再生中 (' + (queue.index + 1) + '/' + queue.trackIds.length + ')' : '再生中';
+  nowLabelEl.textContent = queue
+    ? (queue.mode === 'shuffle' ? 'シャッフル再生中 (' : '連続再生中 (') +
+      (queue.index + 1) + '/' + queue.trackIds.length + ')'
+    : '再生中';
   playSegment(activeTrack.englishBlob, () => {
     if (activeTrack.japaneseBlob) {
       scheduleGap(() => {
@@ -647,35 +780,46 @@ function onCycleComplete() {
   } else if (repeatOn) {
     scheduleGap(runCycle);
   } else {
+    // 聞き終わり。▶ でまた頭から聞き直せる状態にしておく
     playPauseBtn.textContent = '▶';
+    isPlaybackPaused = true;
+    pendingGapAction = runCycle;
+    gapRemaining = 0;
+    setPlaybackState('paused');
   }
 }
 
-function advanceQueue() {
-  queue.index += 1;
-  if (queue.index >= queue.trackIds.length) {
-    if (!repeatOn) {
-      stopPlayback();
-      return;
+async function advanceQueue() {
+  if (!queue) return;
+  let next = null;
+  // 削除済みの曲はスキップして、次に実在する曲を探す
+  for (let tried = 0; tried <= queue.trackIds.length; tried++) {
+    queue.index += 1;
+    if (queue.index >= queue.trackIds.length) {
+      if (!repeatOn) { stopPlayback(); return; }
+      if (queue.mode === 'shuffle') queue.trackIds = shuffleArray(queue.trackIds); // 1周ごとに混ぜ直す
+      queue.index = 0;
     }
-    queue.index = 0;
+    next = folderTracks.find((t) => t.id === queue.trackIds[queue.index]);
+    if (next) break;
   }
-  const nextId = queue.trackIds[queue.index];
-  const next = folderTracks.find((t) => t.id === nextId);
+  if (!next) { stopPlayback(); return; }
   activeTrack = next;
   nowNameEl.textContent = next.englishText || displayName(next.name);
   nowJpEl.textContent = next.japaneseText || '';
-  renderFolderView();
+  await renderFolderView();
   runCycle();
 }
 
-function startPlayback(track) {
+async function startPlayback(track) {
+  clearGapTimer();          // 前の曲の無音タイマーが割り込まないようにする
+  pendingGapAction = null;
   activeTrack = track;
   isPlaybackPaused = false;
   nowNameEl.textContent = track.englishText || displayName(track.name);
   nowJpEl.textContent = track.japaneseText || '';
   playerEl.classList.add('show');
-  renderFolderView();
+  await renderFolderView();
   runCycle();
 }
 
@@ -683,12 +827,20 @@ function stopPlayback() {
   clearGapTimer();
   pendingGapAction = null;
   isPlaybackPaused = false;
+  audioEl.onended = null;
+  audioEl.onerror = null;
   audioEl.pause();
   audioEl.removeAttribute('src');
+  try { audioEl.load(); } catch (e) { /* 空srcのloadに厳しいブラウザ対策 */ }
+  if (currentUrl) { URL.revokeObjectURL(currentUrl); currentUrl = null; }
   playerEl.classList.remove('show');
   activeTrack = null;
   queue = null;
   playingSegment = null;
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = null;
+    setPlaybackState('none');
+  }
   if (view === 'folder') renderFolderView();
 }
 
@@ -732,10 +884,13 @@ function pausePlayback() {
   isPlaybackPaused = true;
   playPauseBtn.textContent = '▶';
   if (gapTimerId) {
-    clearGapTimer(); // pendingGapAction stays set, so resumePlayback can continue from here
+    // 無音の残り時間を覚えておき、再開時はその続きから待つ
+    gapRemaining = Math.max(0, gapRemaining - (Date.now() - gapStartedAt));
+    clearGapTimer(); // pendingGapAction は残す
   } else {
     audioEl.pause();
   }
+  setPlaybackState('paused');
 }
 
 function resumePlayback() {
@@ -743,12 +898,11 @@ function resumePlayback() {
   isPlaybackPaused = false;
   playPauseBtn.textContent = '⏸';
   if (pendingGapAction) {
-    const fn = pendingGapAction;
-    pendingGapAction = null;
-    fn();
+    scheduleGap(pendingGapAction, gapRemaining);
   } else {
     audioEl.play().catch((err) => console.warn('再生に失敗しました', err));
   }
+  setPlaybackState('playing');
 }
 
 playPauseBtn.addEventListener('click', () => {
@@ -813,7 +967,7 @@ folderSelect.addEventListener('change', updateModalForSelection);
 async function openFolderModal() {
   const folders = await getAllFolders();
   folderSelect.innerHTML =
-    folders.map((f) => '<option value="' + f.id + '">📁 ' + f.name + '</option>').join('') +
+    folders.map((f) => '<option value="' + f.id + '">📁 ' + escapeHtml(f.name) + '</option>').join('') +
     '<option value="' + NEW_FOLDER_VALUE + '">＋ 新しいフォルダを作る</option>';
   newFolderName.value = '';
   if (view === 'folder' && currentFolder) {
@@ -827,40 +981,74 @@ async function openFolderModal() {
   modalOverlay.classList.add('show');
 }
 
-document.getElementById('modalCancel').addEventListener('click', () => {
+function closeModal() {
   modalOverlay.classList.remove('show');
   pendingFiles = null;
+}
+
+document.getElementById('modalCancel').addEventListener('click', closeModal);
+
+// 外側タップはキャンセル扱い、フォルダ名入力中のEnterは確定
+modalOverlay.addEventListener('click', (e) => {
+  if (e.target === modalOverlay) closeModal();
+});
+newFolderName.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    modalConfirmBtn.click();
+  }
 });
 
 modalConfirmBtn.addEventListener('click', async () => {
-  let folderId = null;
-  if (folderSelect.value === NEW_FOLDER_VALUE) {
-    const newName = newFolderName.value.trim();
-    if (!newName) {
-      alert('新しいフォルダ名を入力してください。');
-      return;
+  if (!pendingFiles || modalConfirmBtn.disabled) return; // 連打・二重実行の防御
+  try {
+    let folderId = null;
+    if (folderSelect.value === NEW_FOLDER_VALUE) {
+      const newName = newFolderName.value.trim();
+      if (!newName) {
+        alert('新しいフォルダ名を入力してください。');
+        return;
+      }
+      const folders = await getAllFolders();
+      if (folders.some((f) => f.name === newName)) {
+        alert('同じ名前のフォルダがすでにあります。別の名前にしてください。');
+        return;
+      }
+      folderId = await addFolder(newName);
+    } else {
+      folderId = folderSelect.value ? parseInt(folderSelect.value, 10) : null;
+      if (!folderId) {
+        alert('追加先のフォルダを選んでください。');
+        return;
+      }
     }
-    folderId = await addFolder(newName);
-  } else {
-    folderId = folderSelect.value ? parseInt(folderSelect.value, 10) : null;
-    if (!folderId) {
-      alert('追加先のフォルダを選んでください。');
-      return;
+    modalConfirmBtn.disabled = true;
+    modalConfirmBtn.textContent = '読み込み中…';
+    const files = pendingFiles;
+    pendingFiles = null;
+    const { okCount, skipped, failed } = await importZipFilesIntoFolder(folderId, files);
+    modalOverlay.classList.remove('show');
+    const messages = [];
+    if (skipped.length) messages.push('すでに入っているため追加しなかったもの：' + skipped.join('、'));
+    if (failed.length) messages.push('読み込めなかったもの：\n・' + failed.join('\n・'));
+    if (messages.length) alert(okCount + '件を追加しました。\n\n' + messages.join('\n\n'));
+    if (view === 'folder' && currentFolder && currentFolder.id === folderId) {
+      await renderFolderView();
+    } else {
+      const folders = await getAllFolders();
+      const f = folders.find((x) => x.id === folderId);
+      if (f) await openFolder(f);
     }
-  }
-  modalOverlay.classList.remove('show');
-  const files = pendingFiles;
-  pendingFiles = null;
-  const { okCount, failCount } = await importZipFilesIntoFolder(folderId, files);
-  if (failCount) {
-    alert(okCount + '件を追加しました。' + failCount + '件は読み込めませんでした（ZIPの中身をご確認ください）。');
-  }
-  if (view === 'folder' && currentFolder && currentFolder.id === folderId) {
-    await renderFolderView();
-  } else {
-    const folders = await getAllFolders();
-    const f = folders.find((x) => x.id === folderId);
-    if (f) await openFolder(f);
+  } catch (e) {
+    modalOverlay.classList.remove('show');
+    pendingFiles = null;
+    const quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(String(e)));
+    alert(quota
+      ? '端末の空き容量が足りないため、保存できませんでした。不要なデータを減らしてからもう一度お試しください。'
+      : '追加の途中で問題が起きました。もう一度お試しください。\n（' + (e && e.message ? e.message : e) + '）');
+  } finally {
+    modalConfirmBtn.disabled = false;
+    updateModalForSelection(); // ボタンの文言を元に戻す
   }
 });
 
@@ -871,8 +1059,20 @@ if ('serviceWorker' in navigator) {
 }
 
 (async function init() {
-  await seedSampleFolderIfNeeded();
-  renderFoldersView();
+  try {
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(() => {}); // 保存音声をOSに勝手に消されにくくする
+    }
+    await seedSampleFolderIfNeeded();
+    await renderFoldersView();
+  } catch (e) {
+    // 白画面のまま黙らない。何が起きたかを画面に出す
+    emptyEl.style.display = 'block';
+    emptyEl.innerHTML =
+      'データの読み込みで問題が起きました。ページを開き直してみてください。<br>' +
+      'それでも直らない場合は、ブラウザの「プライベートモード」を使っていないかご確認ください。<br><br>' +
+      '<small>' + escapeHtml(String(e)) + '</small>';
+  }
 })();
 </script>
 </body>

@@ -1,7 +1,14 @@
-const CACHE_NAME = 'audio-replay-v20';
-const CORE_FILES = ['./', './index.html', './manifest.json'];
+const CACHE_NAME = 'audio-replay-v21';
+const CORE_FILES = [
+  './',
+  './index.html',
+  './manifest.json',
+  './jszip.min.js',
+  './icon-192.png',
+  './icon-512.png',
+  './apple-touch-icon.png'
+];
 const OPTIONAL_FILES = [
-  'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   './sample/i_arrived_earlier_than_my_checkin_time_could_you_p.zip',
   './sample/when_i_entered_the_room_it_smelt_of_cigarettes_can.zip',
   './sample/can_i_change_some_money_please.zip',
