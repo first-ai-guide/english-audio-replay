@@ -1,4 +1,4 @@
-const CACHE_NAME = 'audio-replay-v21';
+const CACHE_NAME = 'audio-replay-v22';
 const CORE_FILES = [
   './',
   './index.html',

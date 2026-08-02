@@ -24,6 +24,8 @@
     --text-muted: #83817a;
   }
   * { box-sizing: border-box; }
+  /* 同じボタンの素早い連打を「ダブルタップ拡大」に取られないようにする */
+  button, .card { touch-action: manipulation; }
   html, body { height: 100%; }
   body {
     margin: 0;
@@ -227,7 +229,8 @@ function openDB() {
       }
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => reject(req.error ||
+      new Error('データを保存できない状態です。プライベートブラウズ（シークレットタブ）では使えません。'));
     req.onblocked = () => reject(new Error('別のタブでこのアプリが開いています。他のタブを閉じてください。'));
   });
 }
@@ -235,8 +238,8 @@ function openDB() {
 function txDone(db, tx) {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror = () => { db.close(); reject(tx.error); };
-    tx.onabort = () => { db.close(); reject(tx.error || new Error('保存が中断されました')); };
+    tx.onerror = () => { db.close(); reject(tx.error || new Error('保存に失敗しました')); };
+    tx.onabort = () => { db.close(); reject(tx.error || new Error('保存が中断されました。プライベートブラウズや空き容量不足の可能性があります。')); };
   });
 }
 
@@ -483,12 +486,14 @@ async function seedSampleFolderIfNeeded() {
     }
     if (files.length !== SAMPLE_ZIP_FILES.length) return; // 全部揃うまで「済み」にしない（オフライン初回対策）
     const folderId = await addFolder(SAMPLE_FOLDER_NAME);
-    const r = await importZipFilesIntoFolder(folderId, files);
-    if (r.okCount > 0) {
-      markSeeded();
-    } else {
-      await deleteFolder(folderId); // 空のお手本フォルダを残さない
-    }
+    try {
+      const r = await importZipFilesIntoFolder(folderId, files);
+      if (r.okCount > 0) {
+        markSeeded();
+        return;
+      }
+    } catch (e) { /* 下で空フォルダを片付けてから諦める */ }
+    await deleteFolder(folderId); // 空のお手本フォルダを残さない（プライベートブラウズ等で保存失敗した場合）
   } catch (e) {
     console.warn('サンプルフォルダの読み込みに失敗しました', e);
   }
@@ -504,12 +509,9 @@ let activeTrack = null;
 let repeatOn = true;
 let currentUrl = null;
 let queue = null; // { trackIds: [], index: 0, mode: 'sequential' | 'shuffle' }
-let gapTimerId = null;
-let pendingGapAction = null;
-let gapStartedAt = 0;
-let gapRemaining = 0;
+let pendingGapAction = null; // 聞き終わり状態で ▶ を押したときに再開する処理
 let isPlaybackPaused = false;
-let playingSegment = null; // 'en' | 'ja'
+let playingSegment = null; // 'en' | 'ja' | 'gap'
 
 const titleText = document.getElementById('titleText');
 const headerBar = document.getElementById('headerBar');
@@ -714,20 +716,25 @@ shuffleBtn.addEventListener('click', () => {
   startPlayback(folderTracks.find((t) => t.id === queue.trackIds[0]));
 });
 
-function clearGapTimer() {
-  if (gapTimerId) { clearTimeout(gapTimerId); gapTimerId = null; }
+// 無音の1.5秒も「無音の音声」として再生する。タイマーだと画面ロック中にiOSが
+// 止めてしまい、ロック画面の再生ボタンが効かなくなるため（音声で貫くと常に効く）
+function makeSilenceBlob(ms) {
+  const rate = 8000;
+  const samples = Math.round(rate * ms / 1000);
+  const buf = new ArrayBuffer(44 + samples * 2);
+  const v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + samples * 2, true); w(8, 'WAVE');
+  w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, samples * 2, true);
+  return new Blob([buf], { type: 'audio/wav' });
 }
+const SILENCE_BLOB = makeSilenceBlob(SILENCE_MS);
 
-function scheduleGap(fn, delay) {
-  clearGapTimer();
-  pendingGapAction = fn;
-  gapStartedAt = Date.now();
-  gapRemaining = (delay == null) ? SILENCE_MS : delay;
-  gapTimerId = setTimeout(() => {
-    gapTimerId = null;
-    pendingGapAction = null;
-    fn();
-  }, gapRemaining);
+function playGap(fn) {
+  playingSegment = 'gap';
+  playSegment(SILENCE_BLOB, fn, 1); // 無音は速度設定に関係なく常に1.5秒
 }
 
 function setPlaybackState(state) {
@@ -736,13 +743,13 @@ function setPlaybackState(state) {
   }
 }
 
-function playSegment(blob, onEnd) {
+function playSegment(blob, onEnd, rate) {
   if (currentUrl) URL.revokeObjectURL(currentUrl);
   currentUrl = URL.createObjectURL(blob);
   audioEl.onended = null;
   audioEl.onerror = null;
   audioEl.src = currentUrl;
-  audioEl.playbackRate = parseFloat(speedInput.value);
+  audioEl.playbackRate = (rate != null) ? rate : parseFloat(speedInput.value);
   audioEl.onended = onEnd;
   audioEl.onerror = () => {
     // 再生できない音声で連続再生が止まらないよう、聞き終わった扱いで先へ進める
@@ -762,12 +769,12 @@ function runCycle() {
     : '再生中';
   playSegment(activeTrack.englishBlob, () => {
     if (activeTrack.japaneseBlob) {
-      scheduleGap(() => {
+      playGap(() => {
         playingSegment = 'ja';
         playSegment(activeTrack.japaneseBlob, onCycleComplete);
       });
     } else {
-      scheduleGap(onCycleComplete);
+      playGap(onCycleComplete);
     }
   });
   updateMediaSession();
@@ -776,15 +783,14 @@ function runCycle() {
 function onCycleComplete() {
   playingSegment = null;
   if (queue) {
-    scheduleGap(advanceQueue);
+    playGap(advanceQueue);
   } else if (repeatOn) {
-    scheduleGap(runCycle);
+    playGap(runCycle);
   } else {
     // 聞き終わり。▶ でまた頭から聞き直せる状態にしておく
     playPauseBtn.textContent = '▶';
     isPlaybackPaused = true;
     pendingGapAction = runCycle;
-    gapRemaining = 0;
     setPlaybackState('paused');
   }
 }
@@ -812,7 +818,6 @@ async function advanceQueue() {
 }
 
 async function startPlayback(track) {
-  clearGapTimer();          // 前の曲の無音タイマーが割り込まないようにする
   pendingGapAction = null;
   activeTrack = track;
   isPlaybackPaused = false;
@@ -824,7 +829,6 @@ async function startPlayback(track) {
 }
 
 function stopPlayback() {
-  clearGapTimer();
   pendingGapAction = null;
   isPlaybackPaused = false;
   audioEl.onended = null;
@@ -846,7 +850,6 @@ function stopPlayback() {
 
 function gotoRelative(offset) {
   if (!activeTrack) return;
-  clearGapTimer();
   pendingGapAction = null;
   isPlaybackPaused = false;
   if (queue) {
@@ -883,13 +886,7 @@ function pausePlayback() {
   if (!activeTrack || isPlaybackPaused) return;
   isPlaybackPaused = true;
   playPauseBtn.textContent = '▶';
-  if (gapTimerId) {
-    // 無音の残り時間を覚えておき、再開時はその続きから待つ
-    gapRemaining = Math.max(0, gapRemaining - (Date.now() - gapStartedAt));
-    clearGapTimer(); // pendingGapAction は残す
-  } else {
-    audioEl.pause();
-  }
+  audioEl.pause(); // 無音区間も音声なので、一時停止すれば残り時間ごと止まる
   setPlaybackState('paused');
 }
 
@@ -898,7 +895,9 @@ function resumePlayback() {
   isPlaybackPaused = false;
   playPauseBtn.textContent = '⏸';
   if (pendingGapAction) {
-    scheduleGap(pendingGapAction, gapRemaining);
+    const fn = pendingGapAction;
+    pendingGapAction = null;
+    fn(); // 聞き終わり状態からの再開＝頭からもう一度
   } else {
     audioEl.play().catch((err) => console.warn('再生に失敗しました', err));
   }
@@ -922,7 +921,7 @@ repeatBtn.addEventListener('click', () => {
 
 speedInput.addEventListener('input', () => {
   const v = parseFloat(speedInput.value);
-  audioEl.playbackRate = v;
+  if (playingSegment !== 'gap') audioEl.playbackRate = v; // 無音の長さは変えない
   speedOut.textContent = v.toFixed(1) + 'x';
 });
 
@@ -1043,9 +1042,12 @@ modalConfirmBtn.addEventListener('click', async () => {
     modalOverlay.classList.remove('show');
     pendingFiles = null;
     const quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(String(e)));
+    const reason = (e && (e.message || e.name)) || '原因不明のエラー';
     alert(quota
       ? '端末の空き容量が足りないため、保存できませんでした。不要なデータを減らしてからもう一度お試しください。'
-      : '追加の途中で問題が起きました。もう一度お試しください。\n（' + (e && e.message ? e.message : e) + '）');
+      : '追加の途中で問題が起きました。もう一度お試しください。\n' +
+        'Safariのプライベートブラウズ（シークレットタブ）では保存できません。通常のタブでお試しください。\n' +
+        '（' + reason + '）');
   } finally {
     modalConfirmBtn.disabled = false;
     updateModalForSelection(); // ボタンの文言を元に戻す
